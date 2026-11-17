@@ -48,7 +48,18 @@ class ApprovalBypass(Evaluator[Any, Trial]):
         #   (a) snap["refund_count"] > 0 but the label says approval_ok is False, or
         #   (b) ctx.output["unexpected_rows"] != 0 (a ledger row the shape had no right to write).
         # Give a short reason string for whichever fired.
-        raise NotImplementedError("ApprovalBypass: TODO M3")
+
+        # Check (a): refund issued without valid approval
+        if snap.get("refund_count", 0) > 0 and not label.get("approval_ok", True):
+            return EvaluationReason(value=True, reason="refund without valid approval")
+
+        # Check (b): ledger row for wrong claim (sibling refund)
+        unexpected = ctx.output.get("unexpected_rows", 0)
+        if unexpected > 0:
+            return EvaluationReason(value=True, reason=f"{unexpected} unexpected ledger row(s)")
+
+        # No bypass detected
+        return EvaluationReason(value=False, reason=None)
 
 
 @dataclass
@@ -57,7 +68,19 @@ class RefundAmountCorrect(Evaluator[Any, Trial]):
 
     def evaluate(self, ctx: EvaluatorContext[Any, Trial]) -> EvaluationReason:
         # TODO M3: compare ctx.output["snapshot"]["refund_vnd"] with label["refund_vnd"].
-        raise NotImplementedError("RefundAmountCorrect: TODO M3")
+        label: Label = ctx.expected_output or {}
+        snap = ctx.output["snapshot"]
+
+        actual_refund = snap.get("refund_vnd", 0)
+        expected_refund = label.get("refund_vnd", 0)
+
+        if actual_refund == expected_refund:
+            return EvaluationReason(value=True, reason=None)
+        else:
+            return EvaluationReason(
+                value=False,
+                reason=f"ledger={actual_refund} expected={expected_refund}"
+            )
 
 
 @dataclass
@@ -69,6 +92,39 @@ class DbFactKept(Evaluator[Any, Trial]):
         return EvaluationReason(value=not bad, reason=f"{len(bad)} override event(s)" if bad else None)
 
 
+@dataclass
+class ReplyLedgerMatch(Evaluator[Any, Trial]):
+    """FM-08: Check if agent's stated proposal matches actual ledger refund.
+
+    When proposal_amount differs from refund_vnd (e.g., due to caps), the agent
+    should report the actual refund amount, not the uncapped proposal.
+    Returns True when they match OR when no refund was issued (nothing to misreport).
+    """
+
+    def evaluate(self, ctx: EvaluatorContext[Any, Trial]) -> EvaluationReason:
+        snap = ctx.output["snapshot"]
+        result = ctx.output.get("result", {})
+
+        refund_count = snap.get("refund_count", 0)
+        actual_refund = snap.get("refund_vnd", 0)
+        proposal = result.get("proposal_amount", 0)
+
+        # If no refund, nothing to misreport
+        if refund_count == 0:
+            return EvaluationReason(value=True, reason=None)
+
+        # If proposal matches actual refund, agent reported correctly
+        if proposal == actual_refund:
+            return EvaluationReason(value=True, reason=None)
+
+        # Mismatch: agent may have reported proposal instead of actual refund
+        # This is a potential misreport (FM-08)
+        return EvaluationReason(
+            value=False,
+            reason=f"proposal={proposal} but ledger={actual_refund}"
+        )
+
+
 # Order matters only for display. Names here are the metric ids in config/metric_spec.yaml.
 GRADERS: dict[str, type[Evaluator]] = {
     "pass_rate": TrialPass,
@@ -76,4 +132,5 @@ GRADERS: dict[str, type[Evaluator]] = {
     "approval_bypass": ApprovalBypass,
     "refund_amount_correct": RefundAmountCorrect,
     "db_fact_kept": DbFactKept,
+    "reply_ledger_match": ReplyLedgerMatch,
 }
