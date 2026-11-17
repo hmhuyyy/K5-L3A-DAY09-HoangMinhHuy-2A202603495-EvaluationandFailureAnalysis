@@ -198,9 +198,9 @@ Card này đi kèm mỗi báo cáo và được dùng lại ở Day 10.
 
 ### Missing Evidence:
 
-- [ ] A/A noise test (repeated evals with same code)
-- [ ] pass^k reliability metric (consistency across seeds)
-- [ ] Integrity checks (detect eval fraud, tampered ground truth)
+- [x] A/A noise test: seeds 66,77,88,99,110 → pass_hat_5=1.0, Δ=0.0 (MockLLM deterministic)
+- [x] pass^k reliability metric: implemented via `stats.pass_hat_k`, formula uses `math.comb`
+- [x] Integrity checks: `lab9.gate.integrity_check` — NaN, dropped rows, loosened spec, None values
 - [ ] Human disagreement study (inter-rater agreement on subset)
 - [ ] Production shadow mode results
 - [ ] User satisfaction scores
@@ -246,6 +246,65 @@ Card này đi kèm mỗi báo cáo và được dùng lại ở Day 10.
 
 ---
 
-**Last updated:** 2026-11-17 (M4 completion)  
-**Next review:** After v2 eval set build (M5)
+**Last updated:** 2026-11-17 (M5-M7 completion)  
+**Next review:** After production pilot data available
+
+---
+
+## Eval Set v2 (M5)
+
+- **Version:** v2 (sha 1c68e2735cd2)
+- **Items:** 28 items (E-001 to E-028, includes adversarial pack)
+- **Seeds per item:** 5 (11, 22, 33, 44, 55)
+- **Total trials:** 140 (28 × 5)
+- **Source:** v1 items + 14 adversarial cases (FM-06, FM-07, FM-09)
+- **Labels:** `data/eval/labels_v2.json`
+
+### Baseline v2 (workflow - E-workflow-20261117-1c68):
+
+| Metric | Value | Status |
+|---|---|---|
+| approval_bypass | 0 | ✓ PASS |
+| secret_leak | 0 | ✓ PASS |
+| db_fact_kept | 1.0 | ✓ PASS |
+| refund_amount_correct | 1.0 | ✓ PASS |
+| pass_rate | 1.0 | ✓ PASS |
+| reply_ledger_match | 0.7857 | ⚠ WARN (non-blocking@0.85 not met; cap mismatch expected) |
+| pass_5 | 1.0 | ✓ PASS |
+| pass_at_5 | 1.0 | ✓ PASS |
+| pass_hat_5 | 1.0 | ✓ PASS |
+| cost_per_success | 28.7886 | ✓ PASS |
+
+### A/A Noise Analysis (M6):
+
+Seeds 66,77,88,99,110 vs 11,22,33,44,55 (same agent, same eval set):
+
+| Metric | Set A (11-55) | Set B (66-110) | Δ |
+|---|---|---|---|
+| pass_hat_5 | 1.0 | 1.0 | 0.0 |
+| pass_rate | 1.0 | 1.0 | 0.0 |
+| refund_amount_correct | 1.0 | 1.0 | 0.0 |
+
+**Insight:** MockLLM is deterministic → Δ=0 in A/A. Floor 0.80 for pass_hat_5 is set at value achievable by baseline (1.0 >> 0.80). Real LLM would show non-zero Δ; floor must stay outside the A/A noise band to avoid blocking honest PRs.
+
+### Slices (M5):
+
+| Slice | Metric | Floor | Baseline | Status |
+|---|---|---|---|---|
+| denial | pass_rate | ≥ 0.90 | 1.0 | ✓ PASS |
+| money_movement | refund_amount_correct | ≥ 0.90 | 1.0 | ✓ PASS |
+| adversarial | pass_rate | ≥ 0.80 | 1.0 | ✓ PASS |
+
+### Integrity checks (M7):
+
+Checks implemented in `lab9.gate.integrity_check`:
+- NaN / inf detection in numeric columns
+- Dropped rows detection (item×seed count vs spec)
+- Evaluator failure rate threshold
+- Loosened spec detection (ratchet check)
+- None-value sweep
+- Slice tag consistency
+
+**Trap blocking:** `python -m lab9.traps` verifies gate blocks all public traps.
+
 
